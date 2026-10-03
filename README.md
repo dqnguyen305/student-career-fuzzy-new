@@ -1,11 +1,11 @@
 # Student Career Fuzzy
 
-Hệ thống phân tích năng lực học sinh và tư vấn môn thi THPT dựa trên điểm số. Dự án sử dụng tiền xử lý dữ liệu, feature engineering, Fuzzy C-Means (FCM), luật chấm điểm môn học và ánh xạ tổ hợp xét tuyển.
+Hệ thống phân tích năng lực học sinh và tư vấn môn thi THPT dựa trên điểm số. Pipeline kết hợp tiền xử lý, feature engineering, Fuzzy C-Means (FCM), mô hình suy luận mờ Sugeno theo cấu trúc MANFIS, recommender môn học và ánh xạ tổ hợp xét tuyển.
 
 Ứng dụng cung cấp hai cách sử dụng:
 
 - **Tra cứu theo danh sách lớp:** xem kết quả đã tính cho từng học sinh.
-- **Nhập điểm trực tiếp:** nhập điểm ba học kỳ của 9 môn và xem membership theo thời gian thực.
+- **Nhập điểm trực tiếp:** nhập điểm ba giai đoạn của 9 môn, xem membership FCM và kết quả xếp hạng môn từ MANFIS.
 
 ## 1. Mục tiêu nghiệp vụ
 
@@ -29,7 +29,7 @@ Hồ sơ này nghiêng về Ngoại ngữ nhưng vẫn có giao thoa đáng kể
 
 ## 2. Kiến trúc xử lý
 
-Pipeline chính nằm trong `src/main.py` và gồm năm bước:
+Pipeline chính nằm trong `src/main.py` và gồm sáu bước:
 
 ```text
 Excel đầu vào
@@ -44,10 +44,10 @@ Tính điểm trung bình, xu hướng và điểm 3 miền
 Chuẩn hóa, FCM và đánh giá mô hình
     |
     v
-Membership, hồ sơ cụm và đề xuất môn
+Membership, hồ sơ cụm và đề xuất môn bằng baseline
     |
     v
-Tổ hợp xét tuyển + giao diện Streamlit
+Huấn luyện/đánh giá MANFIS, đề xuất tổ hợp + giao diện Streamlit
 ```
 
 ### 2.0. Luồng chạy tổng quát
@@ -56,9 +56,10 @@ Lệnh `src/main.py` là điểm vào chính và chạy tuần tự toàn bộ p
 
 1. Đọc Excel và làm sạch điểm.
 2. Tạo điểm trung bình, xu hướng và ba điểm miền năng lực.
-3. Chuẩn hóa dữ liệu, chạy FCM và tính các chỉ số đánh giá.
-4. Xuất membership, centroid, hồ sơ cụm và đề xuất hai môn tự chọn.
-5. Tìm tối đa bốn tổ hợp xét tuyển phù hợp cho mỗi học sinh.
+3. Chuẩn hóa dữ liệu, chạy FCM và tính các chỉ số phân cụm.
+4. Xuất membership, centroid, hồ sơ cụm và đề xuất Top 2 baseline.
+5. Tạo tập nhãn huấn luyện từ kết quả baseline, huấn luyện/đánh giá MANFIS và sinh dự đoán riêng.
+6. Ánh xạ dự đoán MANFIS thành tối đa bốn tổ hợp xét tuyển cho mỗi học sinh.
 
 Các file trong `data/processed/` là dữ liệu trung gian và kết quả sinh tự động. Không sửa thủ công các file này vì lần chạy pipeline tiếp theo sẽ ghi đè chúng.
 
@@ -256,6 +257,25 @@ Trong đó:
 
 Kết quả được sắp xếp giảm dần và lấy hai môn đầu tiên.
 
+### 5.1. MANFIS tích hợp FCM
+
+Module: `src/counseling/manfis.py`
+
+MANFIS dùng cấu trúc Sugeno bậc nhất. FCM khởi tạo các luật mờ; mỗi luật có một hàm đầu ra tuyến tính được ước lượng bằng weighted least squares. Pipeline thử số luật `2`, `3` và `4`, chọn cấu hình theo validation, đánh giá một lần trên test set, sau đó huấn luyện model triển khai trên toàn bộ dữ liệu.
+
+Đầu vào gồm 17 đặc trưng:
+
+- Điểm ba miền `natural_score`, `social_score`, `english_score`.
+- Điểm trung bình và xu hướng của bảy môn tự chọn.
+
+Hai đầu ra phân loại là `top1_subject` và `top2_subject`; hai đầu ra hồi quy là điểm tương ứng. Khi suy luận, Top 1 và Top 2 luôn là hai môn khác nhau, và điểm Top 1 không thấp hơn Top 2. Các tổ hợp không phải đầu ra trực tiếp của MANFIS: hệ thống tính lại chúng bằng `combination_mapper.py` từ hai môn MANFIS đề xuất và bảng điểm.
+
+#### Nguồn nhãn và đánh giá
+
+`src/data/normalize_counseling_labels.py` chuyển kết quả recommender hiện tại thành `data/raw/manfis_pseudo_labels.csv`. MANFIS dùng các nhãn môn và điểm Top 1/Top 2 trong file này; dữ liệu được ghép với `features.csv` bằng `student_id`. Đây là nguồn nhãn huấn luyện của phiên bản hiện tại, vì vậy kết quả thể hiện mức độ mô hình học được quy tắc tư vấn đang dùng. Các metric hold-out đo khả năng tái tạo những nhãn này; chúng chưa phải thước đo dự báo điểm thi hoặc kết quả tuyển sinh.
+
+Tập được chia xấp xỉ 50:20:30 theo Top 1, với seed `42`. Do một số môn có rất ít nhãn, số lượng từng lớp có thể khiến tỷ lệ chia thực tế chênh nhẹ. Chỉ số test được ghi trong `manfis_metrics.csv`; pipeline cũng lưu model huấn luyện toàn bộ dữ liệu để phục vụ dự đoán trong ứng dụng.
+
 ## 6. Ánh xạ tổ hợp xét tuyển
 
 Module: `src/counseling/combination_mapper.py`
@@ -288,10 +308,11 @@ Với mỗi tổ hợp hợp lệ, hệ thống tính tổng điểm trung bình
 ├── requirements.txt                    # Dependency Python
 ├── README.md                           # Tài liệu dự án
 ├── src/
-│   ├── main.py                         # Pipeline 5 bước
+│   ├── main.py                         # Pipeline FCM, tư vấn và MANFIS
 │   ├── config.py                       # Cấu hình, trọng số và tổ hợp
 │   ├── data/
-│   │   └── preprocessor.py             # Đọc và làm sạch Excel
+│   │   ├── preprocessor.py             # Đọc và làm sạch Excel
+│   │   └── normalize_counseling_labels.py # Chuẩn hóa nhãn tư vấn cho MANFIS
 │   ├── features/
 │   │   └── feature_engineering.py      # Tạo đặc trưng và chuẩn hóa
 │   ├── clustering/
@@ -299,12 +320,13 @@ Với mỗi tổ hợp hợp lệ, hệ thống tính tổng điểm trung bình
 │   │   └── evaluation.py               # FPC, FPE và chỉ số đánh giá
 │   ├── counseling/
 │   │   ├── subject_recommender.py      # Chọn Top 2 môn
-│   │   └── combination_mapper.py       # Ánh xạ tổ hợp
+│   │   ├── combination_mapper.py       # Ánh xạ tổ hợp
+│   │   └── manfis.py                   # FCM khởi tạo luật và suy luận Sugeno
 │   └── visualization/
 │       ├── radar.py                     # Radar năng lực
 │       └── membership_chart.py          # Biểu đồ membership
 ├── data/
-│   ├── raw/                             # Excel đầu vào
+│   ├── raw/                             # Excel đầu vào và nhãn huấn luyện MANFIS đã chuẩn hóa
 │   └── processed/                       # CSV sinh bởi pipeline
 ├── results/                             # Hình ảnh và kết quả phân tích
 └── notebooks/                           # Notebook nghiên cứu
@@ -396,8 +418,8 @@ Nếu đã chạy pipeline sau khi mở ứng dụng, hãy tải lại trang ho�
 
 Giao diện có hai tab:
 
-- **Tra cứu theo danh sách lớp:** lọc lớp, chọn học sinh, xem hai môn ưu tiên, tối đa bốn tổ hợp xét tuyển, biểu đồ radar và membership của ba nhóm năng lực.
-- **Nhập điểm trực tiếp:** nhập điểm lớp 10, lớp 11 và học kỳ 1 lớp 12 cho 9 môn, sau đó xem radar và membership dự đoán theo thời gian thực.
+- **Tra cứu theo danh sách lớp:** lọc lớp, chọn học sinh, xem baseline và MANFIS, các tổ hợp tương ứng, biểu đồ radar và membership ba nhóm năng lực.
+- **Nhập điểm trực tiếp:** nhập điểm lớp 10, lớp 11 và học kỳ 1 lớp 12 cho 9 môn, sau đó xem radar, membership FCM và xếp hạng MANFIS theo thời gian thực.
 
 Tab nhập điểm yêu cầu `centroids.csv`, vì vậy cần chạy pipeline ít nhất một lần trước khi mở ứng dụng.
 
@@ -417,6 +439,11 @@ Tab nhập điểm yêu cầu `centroids.csv`, vì vậy cần chạy pipeline �
 | `fcm_grid_search_results.csv` | Kết quả so sánh các cấu hình FCM |
 | `top2_recommendations.csv` | Hai môn tự chọn được đề xuất |
 | `final_counseling_results.csv` | Kết quả cuối cùng kèm tổ hợp xét tuyển |
+| `manfis_pseudo_labels.csv` | Nhãn Top 1/Top 2 và điểm recommender đã chuẩn hóa để huấn luyện MANFIS |
+| `manfis_model.pkl` | Model MANFIS dùng trong Streamlit |
+| `manfis_metrics.csv` | Metric hold-out cho phân loại môn và sai số điểm trên nhãn huấn luyện hiện tại |
+| `manfis_recommendations.csv` | Dự đoán Top 1/Top 2 từ MANFIS trên danh sách học sinh |
+| `manfis_counseling_results.csv` | Dự đoán MANFIS sau khi ánh xạ sang tổ hợp xét tuyển |
 | `minmax_scaler.pkl` | Scaler được lưu để tái sử dụng |
 
 ## 13. Kiểm thử nhanh
@@ -424,13 +451,13 @@ Tab nhập điểm yêu cầu `centroids.csv`, vì vậy cần chạy pipeline �
 Kiểm tra cú pháp các module chính:
 
 ```powershell
-python -m py_compile app.py src\clustering\fcm.py src\clustering\evaluation.py src\main.py
+python -m py_compile app.py src\clustering\fcm.py src\clustering\evaluation.py src\counseling\manfis.py src\data\normalize_counseling_labels.py src\main.py
 ```
 
 Kiểm tra đầy đủ các module chính:
 
 ```powershell
-python -m py_compile app.py src\config.py src\data\preprocessor.py src\features\feature_engineering.py src\clustering\fcm.py src\clustering\evaluation.py src\counseling\subject_recommender.py src\counseling\combination_mapper.py
+python -m py_compile app.py src\config.py src\data\preprocessor.py src\data\normalize_counseling_labels.py src\features\feature_engineering.py src\clustering\fcm.py src\clustering\evaluation.py src\counseling\subject_recommender.py src\counseling\combination_mapper.py src\counseling\manfis.py src\main.py
 ```
 
 Kiểm tra membership có tổng bằng `1`:
@@ -452,6 +479,8 @@ Kiểm thử nghiệp vụ nên bao gồm:
 - FCM là mô hình không giám sát; nhãn cụm phụ thuộc dữ liệu và cách tạo đặc trưng.
 - Membership là độ thuộc mờ, không phải xác suất đỗ đại học hay xác suất thống kê.
 - Prototype nghiệp vụ giúp nhãn nhất quán nhưng không thay thế việc kiểm định trên dữ liệu thực tế.
+- MANFIS hiện được huấn luyện từ nhãn môn/điểm do recommender baseline tạo ra; báo cáo `manfis_metrics.csv` vì thế đánh giá khả năng tái tạo nhãn này. Để đánh giá dự báo kết quả thi hoặc tuyển sinh, cần bổ sung kết quả thi thật làm nhãn độc lập.
+- Excel và form nhập liệu hiện hỗ trợ ba giai đoạn điểm: lớp 10, lớp 11 và học kỳ 1 lớp 12. Nếu yêu cầu nghiên cứu cần đủ năm học kỳ, cần cập nhật schema Excel và tiền xử lý trước khi huấn luyện lại.
 - Nếu dữ liệu thiếu nhiều học sinh Xã hội nổi trội, cụm Xã hội sẽ kém ổn định dù hệ thống vẫn phải hiển thị đủ ba nhóm theo yêu cầu nghiệp vụ.
 - Điểm đề xuất và tổ hợp chỉ mang tính tham khảo; cần đối chiếu quy chế tuyển sinh hiện hành.
 

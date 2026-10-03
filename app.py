@@ -7,6 +7,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
+import joblib
 
 from src.config import (
     DATA_PROCESSED_DIR,
@@ -16,6 +17,7 @@ from src.config import (
 from src.visualization.radar import plot_student_radar
 from src.counseling.combination_mapper import extract_subject_averages
 from src.clustering.fcm import calculate_fcm_membership
+from src.counseling.manfis import build_manfis_input
 
 st.set_page_config(
     page_title="Hệ Thống Tư Vấn Môn Học Mờ (Fuzzy Career)",
@@ -94,21 +96,53 @@ def load_data():
     features_path = os.path.join(DATA_PROCESSED_DIR, "features.csv")
     membership_path = os.path.join(DATA_PROCESSED_DIR, "membership.csv")
     final_path = os.path.join(DATA_PROCESSED_DIR, "final_counseling_results.csv")
+    manfis_final_path = os.path.join(DATA_PROCESSED_DIR, "manfis_counseling_results.csv")
     centroids_path = os.path.join(DATA_PROCESSED_DIR, "centroids.csv")
+    manfis_model_path = os.path.join(DATA_PROCESSED_DIR, "manfis_model.pkl")
+    manfis_metrics_path = os.path.join(DATA_PROCESSED_DIR, "manfis_metrics.csv")
     
     features_df = pd.read_csv(features_path)
     membership_df = pd.read_csv(membership_path)
     final_df = pd.read_csv(final_path)
+    manfis_final_df = (
+        pd.read_csv(manfis_final_path)
+        if os.path.exists(manfis_final_path)
+        else None
+    )
     centroids_df = pd.read_csv(centroids_path) if os.path.exists(centroids_path) else None
+    manfis_model = joblib.load(manfis_model_path) if os.path.exists(manfis_model_path) else None
+    manfis_metrics = (
+        pd.read_csv(manfis_metrics_path).iloc[0].to_dict()
+        if os.path.exists(manfis_metrics_path)
+        else None
+    )
 
     features_df["student_id"] = features_df["student_id"].astype(str)
     membership_df["student_id"] = membership_df["student_id"].astype(str)
     final_df["student_id"] = final_df["student_id"].astype(str)
+    if manfis_final_df is not None:
+        manfis_final_df["student_id"] = manfis_final_df["student_id"].astype(str)
 
-    return features_df, membership_df, final_df, centroids_df
+    return (
+        features_df,
+        membership_df,
+        final_df,
+        centroids_df,
+        manfis_model,
+        manfis_metrics,
+        manfis_final_df,
+    )
 
 try:
-    features_df, membership_df, final_df, centroids_df = load_data()
+    (
+        features_df,
+        membership_df,
+        final_df,
+        centroids_df,
+        manfis_model,
+        manfis_metrics,
+        manfis_final_df,
+    ) = load_data()
 except Exception as e:
     st.error("❌ Chưa tìm thấy dữ liệu đã xử lý. Hãy chạy `python src/main.py` trước!")
     st.stop()
@@ -210,6 +244,46 @@ with tab1:
             for combi in combis:
                 st.markdown(f"🔹 `{combi}`")
 
+        if manfis_final_df is not None:
+            manfis_info_rows = manfis_final_df[
+                manfis_final_df["student_id"] == selected_s_id
+            ]
+            if not manfis_info_rows.empty:
+                manfis_info = manfis_info_rows.iloc[0]
+                manfis_top1_vn = SUBJECT_MAP_VN.get(
+                    str(manfis_info["top1_subject"]).lower(),
+                    manfis_info["top1_subject"],
+                )
+                manfis_top2_vn = SUBJECT_MAP_VN.get(
+                    str(manfis_info["top2_subject"]).lower(),
+                    manfis_info["top2_subject"],
+                )
+                st.markdown("**Đề xuất MANFIS**")
+                st.caption(
+                    "MANFIS dùng luật mờ khởi tạo bằng FCM và được huấn luyện trên kết quả tư vấn hiện có."
+                )
+                manfis_col1, manfis_col2, manfis_col3 = st.columns([1, 1, 1.5])
+                with manfis_col1:
+                    st.metric(
+                        "MANFIS Top 1",
+                        manfis_top1_vn.upper(),
+                        f"Score: {float(manfis_info['top1_score']):.4f}",
+                    )
+                with manfis_col2:
+                    st.metric(
+                        "MANFIS Top 2",
+                        manfis_top2_vn.upper(),
+                        f"Score: {float(manfis_info['top2_score']):.4f}",
+                    )
+                with manfis_col3:
+                    st.markdown("**Tổ hợp MANFIS:**")
+                    manfis_combinations = [
+                        item.strip()
+                        for item in str(manfis_info["suggested_combinations"]).split("|")
+                    ]
+                    for combination in manfis_combinations:
+                        st.markdown(f"🔹 `{combination}`")
+
         st.divider()
         col_left, col_right = st.columns(2)
         with col_left:
@@ -241,7 +315,7 @@ with tab1:
 # TAB 2: NHẬP ĐIỂM & DỰ ĐOÁN PHÂN CỤM REAL-TIME
 # ==========================================
 with tab2:
-    st.subheader("📝 Nhập Bảng Điểm 3 Học Kỳ - Chạy Thuật Toán FCM Dự Đoán Cụm Năng Lực")
+    st.subheader("📝 Nhập Bảng Điểm 3 Học Kỳ - FCM & MANFIS")
     
     subjects_list = [
         ('Toán', 'math'), ('Văn', 'literature'), ('Lý', 'physics'), ('Hóa', 'chemistry'),
@@ -278,6 +352,44 @@ with tab2:
             )
 
             st.markdown("---")
+
+            if manfis_model is not None:
+                manfis_averages = {
+                    subject: float(user_avg_dict.get(vietnamese_name, 0.0))
+                    for subject, vietnamese_name in {
+                        "math": "Toán", "physics": "Lý", "chemistry": "Hóa",
+                        "biology": "Sinh", "informatics": "Tin học",
+                        "literature": "Văn", "history": "Sử",
+                        "geography": "Địa", "english": "Anh",
+                    }.items()
+                }
+                manfis_features = build_manfis_input(manfis_averages, raw_row)
+                manfis_prediction = manfis_model.predict(manfis_features).iloc[0]
+                st.write("### Xếp hạng môn bằng MANFIS")
+                st.caption(
+                    "MANFIS kết hợp luật mờ khởi tạo từ FCM với các đặc trưng điểm học sinh."
+                )
+                manfis_col1, manfis_col2 = st.columns(2)
+                with manfis_col1:
+                    st.metric(
+                        "MANFIS Top 1",
+                        SUBJECT_MAP_VN.get(manfis_prediction["top1_subject"], manfis_prediction["top1_subject"]),
+                        f"Score: {float(manfis_prediction['top1_score']):.4f}",
+                    )
+                with manfis_col2:
+                    st.metric(
+                        "MANFIS Top 2",
+                        SUBJECT_MAP_VN.get(manfis_prediction["top2_subject"], manfis_prediction["top2_subject"]),
+                        f"Score: {float(manfis_prediction['top2_score']):.4f}",
+                    )
+                if manfis_metrics is not None:
+                    st.caption(
+                        "Hold-out trên nhãn giả: "
+                        f"Top 1 accuracy {float(manfis_metrics['test_top1_accuracy']):.1%}, "
+                        f"Top 2 accuracy {float(manfis_metrics['test_top2_accuracy']):.1%}."
+                    )
+            else:
+                st.info("Chưa có model MANFIS. Hãy chạy lại `python src/main.py` để huấn luyện.")
 
             col_res1, col_res2 = st.columns(2)
             
