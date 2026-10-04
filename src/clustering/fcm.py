@@ -293,7 +293,9 @@ if __name__ == "__main__":
         features_df = pd.read_csv(features_path)
 
         print("🔄 Đang thực hiện phân cụm mờ Fuzzy C-Means (FCM)...")
-        cntr, u, fpc, cluster_mapping, _ = run_fcm_clustering(X_scaled_df, n_clusters=3, m=2.0)
+        cntr, u, fpc, cluster_mapping, _ = run_fcm_clustering(
+            X_scaled_df, n_clusters=3, m=FCM_FUZZINESS
+        )
 
         print(f"✅ Phân cụm hoàn tất! Chỉ số FPC: {fpc:.4f}")
         for idx, name in cluster_mapping.items():

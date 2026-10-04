@@ -40,7 +40,7 @@ WEIGHT_SUBJECT_SCORE = 0.6  # w1: Điểm trung bình môn
 WEIGHT_CLUSTER_FIT = 0.3    # w2: Mức độ thuộc cụm (Membership)
 WEIGHT_TREND_SCORE = 0.1    # w3: Xu hướng tiến bộ
 
-FCM_FUZZINESS = 2.5
+FCM_FUZZINESS = 2.0
 MEMBERSHIP_SCORE_SCALE = 4.0
 
 # Danh mục tất cả khối thi THPT Quốc gia (Dùng 3 môn tiếng Việt)

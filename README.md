@@ -131,7 +131,7 @@ Module: `src/clustering/fcm.py`
 FCM được chạy với:
 
 - Số cụm: `3`.
-- Hệ số mờ: `m = 2.5`, khai báo tại `src/config.py`.
+- Hệ số mờ: `m = 2.0`, khai báo tại `src/config.py`.
 - Sai số hội tụ: `0.005`.
 - Số vòng lặp tối đa: `1000`.
 - Seed: `42`.
@@ -497,7 +497,7 @@ Kiểm thử nghiệp vụ nên bao gồm:
 Các tham số chính nằm trong `src/config.py`:
 
 ```python
-FCM_FUZZINESS = 2.5
+FCM_FUZZINESS = 2.0
 MEMBERSHIP_SCORE_SCALE = 4.0
 WEIGHT_SUBJECT_SCORE = 0.6
 WEIGHT_CLUSTER_FIT = 0.3

@@ -1,2 +1,2 @@
 ﻿target_kind,train_samples,validation_samples,test_samples,selected_rules,validation_selection_loss,test_top1_accuracy,test_top1_macro_f1,test_top1_score_mae,test_top2_accuracy,test_top2_macro_f1,test_top2_score_mae
-pseudo_label_from_current_recommender,114,45,73,4,0.2377169869715817,0.7397260273972602,0.41257974957440374,0.02106905480553521,0.5068493150684932,0.3398970756006609,0.011715468404569185
+pseudo_label_from_current_recommender,114,45,73,4,0.22992509872311043,0.7534246575342466,0.4179214929214929,0.0208467566083739,0.4657534246575342,0.3101806239737274,0.011687336414348585
